@@ -22,13 +22,13 @@ itos = {i: s for s, i in stoi.items()}
 # b = {}
 N = torch.zeros((27, 27), dtype=torch.int32)
 
-# for w in words:
-#     chs = ["."] + list(w) + ["."]
-#     for ch1, ch2 in pairwise(chs):
-#         ix1 = stoi[ch1]
-#         ix2 = stoi[ch2]
-#         N[ix1, ix2] += 1
-#
+for w in words:
+    chs = ["."] + list(w) + ["."]
+    for ch1, ch2 in pairwise(chs):
+        ix1 = stoi[ch1]
+        ix2 = stoi[ch2]
+        N[ix1, ix2] += 1
+
 # print("\n--- Tensor Stats ---")
 # print(f"Tensor shape: {N.shape}")
 # print(f"Total bigram counts: {N.sum().item()}")
