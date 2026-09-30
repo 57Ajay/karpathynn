@@ -1,36 +1,17 @@
 [project]
 name = "nnzero2hero"
 version = "0.1.0"
-description = "Add your description here"
+description = "Karpathy NN lectures stuff"
 readme = "README.md"
 authors = [
     { name = "57Ajay", email = "57ajay.u@gmail.com" }
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "graphviz>=0.21",
     "matplotlib>=3.11.2",
-    "numpy>=2.5.3",
     "torch>=2.14.0",
 ]
 
-[project.scripts]
-nnzero2hero = "nnzero2hero:main"
-
-[build-system]
-requires = ["uv_build>=0.12.20,<0.13.0"]
-build-backend = "uv_build"
-
-[tool.uv.sources]
-torch = [{ index = "pytorch-cpu" }]
-
 [[tool.uv.index]]
-name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
-[dependency-groups]
-dev = [
-    "ipython>=9.17.1",
-    "pytest>=9.1.1",
-]
