@@ -1,0 +1,14 @@
+[package]
+name = "minebprs"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 2
+
+[profile.test]
+opt-level = 2
