@@ -40,10 +40,13 @@ Xte, Yte = build_dataset(words[n2:])
 n_embd = 10
 n_hidden = 200
 
+fan_in = block_size * n_embd
+gain = 5 / 3
+
 g = torch.Generator().manual_seed(2147483647)
 C = torch.randn((27, n_embd), generator=g)
-W1 = torch.randn((block_size * n_embd, n_hidden), generator=g)
-b1 = torch.randn(n_hidden, generator=g)
+W1 = torch.randn((fan_in, n_hidden), generator=g) * (gain / fan_in**0.5)
+b1 = torch.zeros(n_hidden)
 
 W2 = torch.randn((n_hidden, 27), generator=g) * 0.01
 b2 = torch.zeros(27)
@@ -103,6 +106,6 @@ axs[2].set_xlabel("Neuron Index (0 to 199)")
 axs[2].set_ylabel("Example Index (0 to 199)")
 
 plt.tight_layout()
-plt.savefig("plots/l04_tanh_saturation.png", dpi=120)
+plt.savefig("plots/l04_kaiming_init.png", dpi=120)
 plt.close()
 print("Saturation plot saved to plots/l04_tanh_saturation.png")
