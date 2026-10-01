@@ -182,7 +182,7 @@ for i in range(200000):
     ix = torch.randint(0, Xtr.shape[0], (32,))
 
     # forward pass
-    emb = C[X[ix]]
+    emb = C[Xtr[ix]]
 
     h = torch.tanh(emb.view(-1, block_size * n_embd) @ W1 + b1)
     logits = h @ W2 + b2
