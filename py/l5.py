@@ -240,3 +240,145 @@ dhprebn += (1.0 / n) * torch.ones_like(hprebn) * dbnmeani
 cmp("hprebn", dhprebn, hprebn)
 
 # hprebn = embcat @ W1 + b1
+dW1 = embcat.T @ dhprebn
+cmp("W1", dW1, W1)
+dembcat = dhprebn @ W1.T
+cmp("embcat", dembcat, embcat)
+db1 = dhprebn.sum(0)
+cmp("b1", db1, b1)
+
+# embcat = emb.view(emb.shape[0], -1)
+demb = dembcat.view(emb.shape)
+cmp("emb", demb, emb)
+
+# emb = C[Xb]
+dC = torch.zeros_like(C)
+for k in range(Xb.shape[0]):
+    for j in range(Xb.shape[1]):
+        ix = Xb[k, j]
+        dC[ix] += demb[k, j]
+cmp("C", dC, C)
+
+dlogits = F.softmax(logits, dim=1)
+dlogits[range(n), Yb] -= 1.0
+dlogits /= n
+cmp("logits (fused)", dlogits, logits)
+
+
+dhprebn = (bngain * bnvar_inv / n) * (
+    n * dhpreact - dhpreact.sum(0) - (n / (n - 1)) * bnraw * (dhpreact * bnraw).sum(0)
+)
+cmp("hprebn (fused)", dhprebn, hprebn)
+
+
+n_embd = 10
+n_hidden = 200
+
+g = torch.Generator().manual_seed(2147483647)
+C = torch.randn((vocab_size, n_embd), generator=g)
+W1 = (
+    torch.randn((n_embd * block_size, n_hidden), generator=g)
+    * (5 / 3)
+    / ((n_embd * block_size) ** 0.5)
+)
+b1 = torch.randn(n_hidden, generator=g) * 0.1
+W2 = torch.randn((n_hidden, vocab_size), generator=g) * 0.1
+b2 = torch.randn(vocab_size, generator=g) * 0.1
+bngain = torch.randn((1, n_hidden), generator=g) * 0.1 + 1.0
+bnbias = torch.randn((1, n_hidden), generator=g) * 0.1
+
+parameters = [C, W1, b1, W2, b2, bngain, bnbias]
+for p in parameters:
+    p.requires_grad = False
+
+max_steps = 200000
+batch_size = 32
+n = batch_size
+lossi = []
+
+print(f"\nStarting 200K steps of training without autograd...")
+
+with torch.no_grad():
+    for i in range(max_steps):
+        # 1. Minibatch construct
+        ix = torch.randint(0, Xtr.shape[0], (batch_size,), generator=g)
+        Xb, Yb = Xtr[ix], Ytr[ix]
+
+        # 2. Forward pass
+        emb = C[Xb]  # (n, 3, 10)
+        embcat = emb.view(emb.shape[0], -1)  # (n, 30)
+        hprebn = embcat @ W1 + b1  # (n, 200)
+
+        # BatchNorm forward
+        bnmean = hprebn.mean(0, keepdim=True)
+        bnvar = hprebn.var(0, keepdim=True, unbiased=True)
+        bnvar_inv = (bnvar + 1e-5) ** -0.5
+        bnraw = (hprebn - bnmean) * bnvar_inv
+        hpreact = bngain * bnraw + bnbias
+
+        # Non-linearity & Output
+        h = torch.tanh(hpreact)  # (n, 200)
+        logits = h @ W2 + b2  # (n, 27)
+        loss = F.cross_entropy(logits, Yb)
+
+        # 3. Pure Manual Backward Pass
+        # Fused softmax + cross-entropy
+        dlogits = F.softmax(logits, dim=1)
+        dlogits[range(n), Yb] -= 1.0
+        dlogits /= n
+
+        # Layer 2 backprop
+        dh = dlogits @ W2.T
+        dW2 = h.T @ dlogits
+        db2 = dlogits.sum(0)
+
+        # Tanh backprop
+        dhpreact = (1.0 - h**2) * dh
+
+        # BatchNorm backprop
+        dbngain = (bnraw * dhpreact).sum(0, keepdim=True)
+        dbnbias = dhpreact.sum(0, keepdim=True)
+        dhprebn = (bngain * bnvar_inv / n) * (
+            n * dhpreact
+            - dhpreact.sum(0)
+            - (n / (n - 1)) * bnraw * (dhpreact * bnraw).sum(0)
+        )
+
+        # Layer 1 backprop
+        dembcat = dhprebn @ W1.T
+        dW1 = embcat.T @ dhprebn
+        db1 = dhprebn.sum(0)
+
+        # Embedding backprop (vectorized accumulation)
+        demb = dembcat.view(emb.shape)
+        dC = torch.zeros_like(C)
+        dC.index_add_(0, Xb.view(-1), demb.view(-1, n_embd))
+
+        grads = [dC, dW1, db1, dW2, db2, dbngain, dbnbias]
+
+        # 4. Parameter update (with learning rate decay)
+        lr = 0.1 if i < 100000 else 0.01
+        for p, grad in zip(parameters, grads):
+            p.data += -lr * grad
+
+        # 5. Logging
+        if i % 10000 == 0 or i == max_steps - 1:
+            print(f"step {i:6d} / {max_steps:6d} | loss: {loss.item():.4f}")
+        lossi.append(loss.item())
+
+# Final Evaluation on Train & Validation sets
+with torch.no_grad():
+    for name, split_X, split_Y in [("train", Xtr, Ytr), ("val", Xva, Yva)]:
+        emb = C[split_X]
+        embcat = emb.view(emb.shape[0], -1)
+        hprebn = embcat @ W1 + b1
+        # Using batch statistics across the split
+        bnmean = hprebn.mean(0, keepdim=True)
+        bnvar = hprebn.var(0, keepdim=True, unbiased=True)
+        bnvar_inv = (bnvar + 1e-5) ** -0.5
+        bnraw = (hprebn - bnmean) * bnvar_inv
+        hpreact = bngain * bnraw + bnbias
+        h = torch.tanh(hpreact)
+        logits = h @ W2 + b2
+        loss = F.cross_entropy(logits, split_Y)
+        print(f"Final {name:5s} loss: {loss.item():.4f}")
