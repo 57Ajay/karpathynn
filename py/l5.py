@@ -1,4 +1,3 @@
-from l4 import bnmean
 from matplotlib.pylab import shape
 import torch
 import torch.nn.functional as F
@@ -218,7 +217,6 @@ dbnvar_inv = (bndiff * dbnraw).sum(0, keepdim=True)
 cmp("bnvar_inv", dbnvar_inv, bnvar_inv)
 
 dbndiff = bnvar_inv * dbnraw
-cmp("bndiff", dbndiff, bndiff)
 
 # bnvar_inv = (bnvar + 1e-5)**-0.5 #(1, 64)
 dbnvar = (-0.5 * (bnvar + 1e-5) ** -1.5) * dbnvar_inv
@@ -229,14 +227,16 @@ dbndiffsquarred = (1.0 / (n - 1)) * torch.ones_like(bndiffsquarred) * dbnvar
 cmp("bndiffsquarred", dbndiffsquarred, bndiffsquarred)
 
 # bndiffsquarred = bndiff**2 # (32, 64)
-dbndiff += (2 * bndiff) + dbndiffsquarred
+dbndiff += (2 * bndiff) * dbndiffsquarred
 cmp("bndiff", dbndiff, bndiff)
 
 # bndiff = hprebn - bnmeani # (32, 64)
 dbnmeani = (-dbndiff).sum(0, keepdim=True)
-cmp("bnmeani", dbnmeani, bnmean)
+cmp("bnmeani", dbnmeani, bnmeani)
 dhprebn = dbndiff.clone()
 
 # bnmeani = 1/n * hprebn.sum(0, keepdim=True) # (1, 64)
 dhprebn += (1.0 / n) * torch.ones_like(hprebn) * dbnmeani
 cmp("hprebn", dhprebn, hprebn)
+
+# hprebn = embcat @ W1 + b1
