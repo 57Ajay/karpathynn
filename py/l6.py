@@ -14,8 +14,8 @@ itos = {i: s for s, i in stoi.items()}
 
 
 block_size = 8
-n_embd = 10
-n_hidden = 68
+n_embd = 24
+n_hidden = 128
 
 
 def build_dataset(words_subset):
