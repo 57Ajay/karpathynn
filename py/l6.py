@@ -1,7 +1,8 @@
+import os
 import random
 import torch
 import torch.nn.functional as F
-
+import matplotlib.pyplot as plt
 
 with open("./data/names.txt", "r") as file:
     words = file.read().splitlines()
@@ -12,7 +13,9 @@ stoi["."] = 0
 itos = {i: s for s, i in stoi.items()}
 
 
-block_size = 3
+block_size = 8
+n_embd = 10
+n_hidden = 200
 
 
 def build_dataset(words_subset):
@@ -102,39 +105,101 @@ class Tanh:
         return []
 
 
-# using above pythorchified way to train MLP
-n_embd = 10
-n_hidden = 100
-g = torch.Generator().manual_seed(2147483647)
+g = torch.Generator().manual_seed(69)
 
-C = torch.randn((27, n_embd), generator=g)
 
-# Linear layers before BatchNorm use bias=False!
-layers = [
-    Linear(block_size * n_embd, n_hidden, bias=False),
-    BatchNorm1d(n_hidden),
-    Tanh(),
-    Linear(n_hidden, n_hidden, bias=False),
-    BatchNorm1d(n_hidden),
-    Tanh(),
-    Linear(n_hidden, n_hidden, bias=False),
-    BatchNorm1d(n_hidden),
-    Tanh(),
-    Linear(n_hidden, 27, bias=True),
-]
+class Embedding:
+    def __init__(self, vocab_size, n_embd):
+        self.weight = torch.randn(
+            (vocab_size, n_embd), generator=g
+        )  # [vocab_size, n_embd]
 
-# Scaling the output layer to prevent hockey-stick loss
-with torch.no_grad():
-    layers[-1].weight *= 0.01
+    def __call__(self, IX):  # IX: [B, T]
+        self.out = self.weight[IX]
+        return self.out  # [B, T, n_embd]
 
-parameters = [C] + [p for layer in layers for p in layer.parameters()]
-print(
-    f"\nTotal parameters in modular deep model: {sum(p.nelement() for p in parameters)}"
+    def parameters(self):
+        return [self.weight]
+
+
+# emb_layer = Embedding(vocab_size=27, n_embd=10)
+# test_x = Xtr[:4]  # shape: (4, 8)
+# test_out = emb_layer(test_x)
+# print("Input shape: ", test_x.shape)
+# print("Output shape:", test_out.shape)
+# print("Num params:  ", sum(p.numel() for p in emb_layer.parameters()))
+
+
+class FlattenConsecutive:
+    def __init__(self, n):
+        self.n = n
+
+    def __call__(self, x):
+        B, T, C = x.shape
+        x = x.view(B, T // self.n, C * self.n)
+
+        if x.shape[1] == 1:
+            x = x.squeeze(1)
+
+        self.out = x
+        return self.out
+
+    def parameters(self):
+        return []
+
+
+test_out = torch.randn((4, 8, 10))
+flat8 = FlattenConsecutive(n=8)
+flat2 = FlattenConsecutive(n=4)
+#
+# print("Input shape:         ", test_out.shape)
+# print("With n=8 (flat MLP): ", flat8(test_out).shape)
+# print("With n=2 (pairs):    ", flat2(test_out).shape)
+
+
+class Sequencial:
+    def __init__(self, layers):
+        self.layers = layers
+
+    def __call__(self, x):
+        for layers in self.layers:
+            x = layers(x)
+        self.x = x
+        return self.x
+
+    def parameters(self):
+        return [p for layer in self.layers for p in layer.parameters()]
+
+
+model = Sequencial(
+    [
+        Embedding(27, n_embd),
+        FlattenConsecutive(8),
+        Linear(n_embd * block_size, n_hidden, False),
+        BatchNorm1d(n_hidden),
+        Tanh(),
+        Linear(n_hidden, 27),
+    ]
 )
+
+# Xb, Yb = Xtr[:4], Ytr[:4]
+# x = Xb
+# print("Input shape:", x.shape)
+# for layer in model.layers:
+#     x = layer(x)
+#     print(f"{layer.__class__.__name__:20s} -> {tuple(x.shape)}")
+
+with torch.no_grad():
+    model.layers[-1].weight *= 0.1
+
+parameters = model.parameters()
+print(f"Total parameters: {sum(p.numel() for p in parameters)}")
+
 for p in parameters:
     p.requires_grad = True
 
-# --- TRAINING LOOP (200,000 STEPS) ---
+lossi = []
+
 max_steps = 200000
 batch_size = 32
 
@@ -144,12 +209,9 @@ for i in range(max_steps):
     Xb, Yb = Xtr[ix], Ytr[ix]
 
     # Forward pass
-    emb = C[Xb]
-    x = emb.view(emb.shape[0], -1)
-    for layer in layers:
-        x = layer(x)
-    loss = F.cross_entropy(x, Yb)
-
+    logits = model(Xb)
+    loss = F.cross_entropy(logits, Yb)
+    lossi.append(loss.log10().item())
     # Backward pass
     for p in parameters:
         p.grad = None
@@ -163,44 +225,44 @@ for i in range(max_steps):
     if i % 20000 == 0 or i == max_steps - 1:
         print(f"step {i:6d} | lr: {lr:.2f} | minibatch loss: {loss.item():.4f}")
 
-
-# --- EVALUATION (SWITCH TO EVAL MODE!) ---
-for layer in layers:
+for layer in model.layers:
     layer.training = False
 
 
 @torch.no_grad()
 def evaluate_split(X_split, Y_split):
-    emb = C[X_split]
-    x = emb.view(emb.shape[0], -1)
-    for layer in layers:
-        x = layer(x)
-    return F.cross_entropy(x, Y_split).item()
+    logits = model(X_split)
+    return F.cross_entropy(logits, Y_split).item()
 
 
 train_loss = evaluate_split(Xtr, Ytr)
 val_loss = evaluate_split(Xva, Yva)
 
-print("\n--- Final Modular Evaluation ---")
 print(f"Train loss: {train_loss:.4f}")
 print(f"Val loss:   {val_loss:.4f}")
-
-# --- SAMPLE NAMES (with training=False) ---
-print("\n--- Generated Names (Modular Deep MLP with BatchNorm) ---")
-g_sample = torch.Generator().manual_seed(2147483647 + 10)
 
 for _ in range(10):
     out = []
     context = [0] * block_size
     while True:
-        emb = C[torch.tensor([context])]
-        x = emb.view(1, -1)
-        for layer in layers:
-            x = layer(x)
-        probs = F.softmax(x, dim=1)
-        ix = int(torch.multinomial(probs, num_samples=1, generator=g_sample).item())
+        logits = model(torch.tensor([context]))
+        probs = F.softmax(logits, dim=1)
+        ix = int(torch.multinomial(probs, num_samples=1).item())
         context = context[1:] + [ix]
         out.append(itos[ix])
         if ix == 0:
             break
     print("".join(out))
+
+
+os.makedirs("plots", exist_ok=True)
+plt.figure(figsize=(10, 4))
+# Reshaping 200,000 steps into (200, 1000) and then the mean across each 1,000 steps
+smoothed_loss = torch.tensor(lossi).view(-1, 1000).mean(1)
+plt.plot(smoothed_loss)
+plt.title("L6 Baseline Flat Model Loss (Averaged over 1000-step windows)")
+plt.xlabel("1k steps")
+plt.ylabel("log10(loss)")
+plt.grid(True)
+plt.savefig("plots/l06_baseline_loss.png", dpi=120, bbox_inches="tight")
+print("Saved loss plot to plots/l06_baseline_loss.png")
