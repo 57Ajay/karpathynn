@@ -15,7 +15,7 @@ itos = {i: s for s, i in stoi.items()}
 
 block_size = 8
 n_embd = 10
-n_hidden = 200
+n_hidden = 68
 
 
 def build_dataset(words_subset):
@@ -70,10 +70,11 @@ class BatchNorm1d:
         self.running_mean = torch.zeros(dim)
         self.running_var = torch.ones(dim)
 
-    def __call__(self, x):
+    def __call__(self, x: torch.Tensor):
         if self.training:
-            xmean = x.mean(0, keepdim=True)
-            xvar = x.var(0, keepdim=True, unbiased=False)
+            dim = 0 if x.ndim == 2 else (0, 1)
+            xmean = x.mean(dim, keepdim=True)
+            xvar = x.var(dim, keepdim=True, unbiased=False)
         else:
             xmean = self.running_mean
             xvar = self.running_var
@@ -85,10 +86,10 @@ class BatchNorm1d:
             with torch.no_grad():
                 self.running_mean = (
                     1 - self.momentum
-                ) * self.running_mean + self.momentum * xmean
+                ) * self.running_mean + self.momentum * xmean.squeeze()
                 self.running_var = (
                     1 - self.momentum
-                ) * self.running_var + self.momentum * xvar
+                ) * self.running_var + self.momentum * xvar.squeeze()
 
         return self.out
 
@@ -157,7 +158,7 @@ flat2 = FlattenConsecutive(n=4)
 # print("With n=2 (pairs):    ", flat2(test_out).shape)
 
 
-class Sequencial:
+class Sequential:
     def __init__(self, layers):
         self.layers = layers
 
@@ -171,16 +172,29 @@ class Sequencial:
         return [p for layer in self.layers for p in layer.parameters()]
 
 
-model = Sequencial(
+model = Sequential(
     [
         Embedding(27, n_embd),
-        FlattenConsecutive(8),
-        Linear(n_embd * block_size, n_hidden, False),
+        # Level 1: 8 tokens -> 4 pairs
+        FlattenConsecutive(2),
+        Linear(n_embd * 2, n_hidden, bias=False),
         BatchNorm1d(n_hidden),
         Tanh(),
+        # Level 2: 4 pairs -> 2 quads
+        FlattenConsecutive(2),
+        Linear(n_hidden * 2, n_hidden, bias=False),
+        BatchNorm1d(n_hidden),
+        Tanh(),
+        # Level 3: 2 quads -> 1 octet (squeezed to 2D)
+        FlattenConsecutive(2),
+        Linear(n_hidden * 2, n_hidden, bias=False),
+        BatchNorm1d(n_hidden),
+        Tanh(),
+        # Final classifier
         Linear(n_hidden, 27),
     ]
 )
+
 
 # Xb, Yb = Xtr[:4], Ytr[:4]
 # x = Xb
