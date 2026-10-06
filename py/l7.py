@@ -4,9 +4,11 @@ import torch.nn.functional as F
 
 
 batch_size = 32
-block_size = 8
-n_embd = 32
+block_size = 64
+n_embd = 128
 n_layer = 4
+n_head = 4
+
 
 torch.manual_seed(69)
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -96,7 +98,7 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     def __init__(self, n_embd: int, n_head: int):
         super().__init__()
-        self.head_size = n_head // n_embd
+        self.head_size = n_embd // n_head
         self.sa = MultiHeadAttention(n_head, self.head_size)
         self.ffwd = FeedForward(n_embd)
         self.ln1 = nn.LayerNorm(n_embd)
@@ -104,7 +106,7 @@ class Block(nn.Module):
 
     def forward(self, x: torch.Tensor):
         x = x + self.sa(self.ln1(x))
-        x = x + self.sa(self.ln2(x))
+        x = x + self.ffwd(self.ln2(x))
         return x
 
 
@@ -114,7 +116,7 @@ class BigramLanguageModel(nn.Module):
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.position_embedding_table = nn.Embedding(block_size, n_embd)
 
-        self.blocks = nn.Sequential(*[Block(n_embd, n_head=4) for _ in range(n_layer)])
+        self.blocks = nn.Sequential(*[Block(n_embd, n_head) for _ in range(n_layer)])
         self.ln_f = nn.LayerNorm(n_embd)
         self.lm_head = nn.Linear(
             n_embd, vocab_size
@@ -158,7 +160,7 @@ class BigramLanguageModel(nn.Module):
         return idx
 
 
-model = BigramLanguageModel(vocab_size)
+model = BigramLanguageModel(vocab_size).to(device)
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 
 eval_iters = 200
@@ -181,7 +183,7 @@ def estimate_loss():
 
 optemizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-for i in range(10000):
+for i in range(5000):
     if i % 500 == 0:
         losses = estimate_loss()
         print(
