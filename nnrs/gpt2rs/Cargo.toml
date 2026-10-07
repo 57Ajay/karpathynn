@@ -1,0 +1,15 @@
+[package]
+name = "gpt2rs"
+version = "0.1.0"
+edition = "2021"
+description = "GPT-2 in pure Rust: the 124M architecture, KV-cache inference, safetensors loading, and CPU training — zero dependencies."
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+[profile.dev]
+opt-level = 2
+
+[profile.test]
+opt-level = 2
