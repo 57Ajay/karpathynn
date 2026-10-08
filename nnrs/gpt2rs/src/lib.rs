@@ -1,6 +1,7 @@
 pub mod bpe_core;
 pub mod bpe_gpt2;
 pub mod hf;
+pub mod infer;
 pub mod json;
 pub mod model;
 pub mod nn;
