@@ -1,5 +1,7 @@
 pub mod bpe_core;
 pub mod bpe_gpt2;
+pub mod checkpoint;
+pub mod data;
 pub mod hf;
 pub mod infer;
 pub mod json;
